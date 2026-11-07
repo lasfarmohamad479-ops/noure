@@ -1,0 +1,309 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  HeartHandshake,
+  Search,
+  Play,
+  Pause,
+  RotateCcw,
+  Check,
+  Loader2,
+  Sun,
+  MoonStar,
+} from "lucide-react";
+import PageHeader from "@/components/PageHeader";
+import { useBookmarks } from "@/lib/visitor";
+
+type DhikrItem = { text: string; count: number; audio: string | null };
+type AdhkarCat = { category: string; items: DhikrItem[] };
+
+const PRIORITIES = [
+  "أذكار الصباح والمساء",
+  "أذكار النوم",
+  "أذكار الاستيقاظ من النوم",
+  "دعاء الهم والحزن",
+  "الاستغفار و التوبة",
+  "الصلاة على النبي بعد التشهد",
+  "الدعاء عند الابتلاء",
+  "دعاء السفر",
+];
+
+export default function AdhkarPage() {
+  const [data, setData] = useState<AdhkarCat[]>([]);
+  const [activeCat, setActiveCat] = useState<string>("");
+  const [search, setSearch] = useState("");
+  const [counters, setCounters] = useState<Record<string, number>>({});
+  const [playing, setPlaying] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { toggle, isSaved } = useBookmarks();
+
+  useEffect(() => {
+    fetch("/data/adhkar.json")
+      .then((r) => r.json())
+      .then((d: AdhkarCat[]) => {
+        setData(d);
+        setActiveCat(d[0]?.category || "");
+      });
+  }, []);
+
+  useEffect(() => () => audioRef.current?.pause(), []);
+
+  const ordered = useMemo(() => {
+    return [...data].sort((a, b) => {
+      const ia = PRIORITIES.indexOf(a.category);
+      const ib = PRIORITIES.indexOf(b.category);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+  }, [data]);
+
+  const active = useMemo(
+    () => ordered.find((c) => c.category === activeCat),
+    [ordered, activeCat]
+  );
+
+  const searched = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.trim();
+    const out: { cat: string; item: DhikrItem; idx: number }[] = [];
+    for (const c of ordered)
+      c.items.forEach((item, idx) => {
+        if (item.text.includes(q)) out.push({ cat: c.category, item, idx });
+      });
+    return out.slice(0, 40);
+  }, [search, ordered]);
+
+  const bump = (key: string, count: number) => {
+    setCounters((c) => {
+      const v = (c[key] || 0) + 1;
+      return { ...c, [key]: v >= count ? count : v };
+    });
+    if (navigator.vibrate) navigator.vibrate(15);
+  };
+
+  const reset = (key: string) => setCounters((c) => ({ ...c, [key]: 0 }));
+
+  const playAudio = (item: DhikrItem, key: string) => {
+    if (!item.audio) return;
+    if (audioRef.current) audioRef.current.pause();
+    if (playing === key) {
+      setPlaying(null);
+      return;
+    }
+    const a = new Audio(item.audio);
+    audioRef.current = a;
+    setPlaying(key);
+    a.onended = () => setPlaying(null);
+    a.onerror = () => setPlaying(null);
+    a.play().catch(() => setPlaying(null));
+  };
+
+  const CatIcon = activeCat?.includes("النوم") ? MoonStar : Sun;
+
+  return (
+    <div>
+      <PageHeader
+        title="الأذكَارُ والأدعِيَة"
+        subtitle="من كتاب حصن المسلم للشيخ سعيد القحطاني — أذكار الصباح والمساء والنوم والاستيقاظ وأدعية مأثورة، مع العدّاد والاستماع الصوتي"
+      >
+        <div className="inline-flex items-center gap-2 glass gold-border rounded-full px-5 py-2 mt-6">
+          <HeartHandshake size={16} className="text-emerald-glow" />
+          <span className="text-sm text-cream-300">
+            ﴿ وَاذْكُر رَّبَّكَ كَثِيرًا وَسَبِّحْ بِالْعَشِيِّ وَالْإِبْكَارِ ﴾ [آل عمران: ٤١]
+          </span>
+        </div>
+      </PageHeader>
+
+      <div className="max-w-7xl mx-auto px-4 py-10">
+        {/* search */}
+        <div className="relative mb-6 max-w-2xl mx-auto">
+          <Search size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-cream-500" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ابحث في الأذكار… مثال: اللهم بك أصبحنا"
+            className="input-lux w-full pr-12 text-center"
+          />
+        </div>
+
+        {/* categories */}
+        <div className="flex flex-wrap justify-center gap-2.5 mb-10">
+          {ordered.map((c) => (
+            <button
+              key={c.category}
+              onClick={() => {
+                setActiveCat(c.category);
+                setSearch("");
+                window.scrollTo({ top: 300, behavior: "smooth" });
+              }}
+              className={`text-[13px] font-semibold rounded-full px-4 py-2.5 transition-all ${
+                activeCat === c.category && !search
+                  ? "bg-gold-500 text-night-950 shadow-[0_5px_20px_rgba(212,175,55,0.3)]"
+                  : "glass text-cream-300/75 hover:text-gold-300 border border-white/[0.07]"
+              }`}
+            >
+              {c.category}
+            </button>
+          ))}
+        </div>
+
+        {search ? (
+          <div className="space-y-5 max-w-4xl mx-auto">
+            <p className="text-center text-cream-500 text-sm">
+              نتائج البحث ({searched.length})
+            </p>
+            {searched.map(({ cat, item, idx }) => (
+              <DhikrCard
+                key={`${cat}-${idx}`}
+                item={item}
+                cat={cat}
+                idx={idx}
+                count={counters[`${cat}:${idx}`] || 0}
+                onBump={() => bump(`${cat}:${idx}`, item.count)}
+                onReset={() => reset(`${cat}:${idx}`)}
+                onPlay={() => playAudio(item, `${cat}:${idx}`)}
+                isPlaying={playing === `${cat}:${idx}`}
+                saved={isSaved("dhikr", `${cat}:${idx}`)}
+                onSave={() => toggle("dhikr", `${cat}:${idx}`, cat, item.text.slice(0, 150))}
+              />
+            ))}
+          </div>
+        ) : active ? (
+          <div className="space-y-5 max-w-4xl mx-auto">
+            <div className="text-center mb-8">
+              <span className="inline-flex items-center gap-2 text-gold-300 font-kufi font-bold text-2xl">
+                <CatIcon size={22} />
+                {active.category}
+              </span>
+              <p className="text-cream-500 text-sm mt-2">
+                {active.items.length} ذكراً — اضغط على الذكر للعدّ، أو استمع إليه
+              </p>
+            </div>
+            {active.items.map((item, idx) => (
+              <DhikrCard
+                key={`${active.category}-${idx}`}
+                item={item}
+                cat={active.category}
+                idx={idx}
+                count={counters[`${active.category}:${idx}`] || 0}
+                onBump={() => bump(`${active.category}:${idx}`, item.count)}
+                onReset={() => reset(`${active.category}:${idx}`)}
+                onPlay={() => playAudio(item, `${active.category}:${idx}`)}
+                isPlaying={playing === `${active.category}:${idx}`}
+                saved={isSaved("dhikr", `${active.category}:${idx}`)}
+                onSave={() =>
+                  toggle("dhikr", `${active.category}:${idx}`, active.category, item.text.slice(0, 150))
+                }
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center justify-center py-24">
+            <Loader2 className="animate-spin text-gold-400" size={30} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DhikrCard({
+  item,
+  cat,
+  idx,
+  count,
+  onBump,
+  onReset,
+  onPlay,
+  isPlaying,
+  saved,
+  onSave,
+}: {
+  item: DhikrItem;
+  cat: string;
+  idx: number;
+  count: number;
+  onBump: () => void;
+  onReset: () => void;
+  onPlay: () => void;
+  isPlaying: boolean;
+  saved: boolean;
+  onSave: () => void;
+}) {
+  const done = count >= item.count;
+  const pct = Math.min(100, (count / item.count) * 100);
+  return (
+    <motion.article
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(idx * 0.05, 0.4) }}
+      className="glass luxury-frame rounded-2xl p-6 md:p-8"
+    >
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <span className="text-[11px] text-cream-500">{cat}</span>
+        <div className="flex items-center gap-2">
+          {item.audio && (
+            <button
+              onClick={onPlay}
+              className={`w-9 h-9 rounded-xl grid place-items-center transition-all ${
+                isPlaying
+                  ? "bg-emerald-glow/20 text-emerald-glow border border-emerald-glow/40"
+                  : "glass border border-white/10 text-cream-300/70 hover:text-emerald-glow"
+              }`}
+              aria-label="استماع"
+            >
+              {isPlaying ? <Pause size={15} /> : <Play size={15} />}
+            </button>
+          )}
+          <button
+            onClick={onSave}
+            className={`text-xs rounded-full px-3 py-1.5 transition-all ${
+              saved
+                ? "bg-gold-500/15 border border-gold-500/40 text-gold-300"
+                : "glass border border-white/10 text-cream-300/60 hover:text-gold-300"
+            }`}
+          >
+            {saved ? "محفوظ" : "حفظ"}
+          </button>
+        </div>
+      </div>
+
+      <button
+        onClick={onBump}
+        className={`block w-full text-right font-amiri text-[1.15rem] md:text-[1.28rem] leading-[2.35] text-cream-100 rounded-xl transition-all active:scale-[0.995] ${
+          done ? "opacity-70" : ""
+        }`}
+      >
+        {item.text}
+      </button>
+
+      <div className="flex items-center gap-4 mt-6 pt-4 border-t border-white/[0.05]">
+        <span className="text-xs text-cream-500 shrink-0">
+          العدد: {item.count.toLocaleString("ar-EG")} مرة
+        </span>
+        <div className="flex-1 h-2 rounded-full bg-white/[0.06] overflow-hidden">
+          <motion.div
+            className="h-full rounded-full bg-gradient-to-l from-gold-500 to-emerald-glow"
+            animate={{ width: `${pct}%` }}
+            transition={{ type: "spring", stiffness: 200, damping: 25 }}
+          />
+        </div>
+        <span
+          className={`font-kufi font-bold text-sm w-14 text-center ${
+            done ? "text-emerald-glow" : "text-gold-300"
+          }`}
+        >
+          {done ? <Check className="inline" size={16} /> : count.toLocaleString("ar-EG")}
+        </span>
+        <button
+          onClick={onReset}
+          className="text-cream-500 hover:text-cream-100 transition-colors"
+          aria-label="إعادة"
+        >
+          <RotateCcw size={15} />
+        </button>
+      </div>
+    </motion.article>
+  );
+}
